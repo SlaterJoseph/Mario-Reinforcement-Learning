@@ -1,3 +1,4 @@
+import numpy as np
 from gym import Env
 
 # Component Import
@@ -13,12 +14,12 @@ from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 import random
 
 ###################################################################################################
-EPISODE_COUNT = 10000
+EPISODE_COUNT = 100
 EXPERIENCE_STORAGE_SIZE = 10000
 BATCH_SIZE = 10
-RENDER_EVERY = 500
-UPDATE_EVERY = 50
-MONITOR_EVERY = 100
+RENDER_EVERY = 25
+UPDATE_EVERY = 25
+MONITOR_EVERY = 25
 
 MIN_EPSILON = 0.01
 EPSILON_DECAY = 0.999999999995
@@ -26,6 +27,8 @@ DISCOUNT = 0.95
 
 MODEL_PATH = 'models'
 VERSION = 'V1'
+
+
 ########################################################################################################################
 
 
@@ -50,8 +53,13 @@ def evaluate_performance(env: Env, agent: Agent, stack: FrameStack, episode_amou
 
         while not done:
             stack.add_frame(state)
+
+            # Normalize the pixels
             stack_state = stack.get_stacked_state()
-            action = agent.policy(stack_state)
+
+            # Add 1 dimension as the batch size is 1
+            get_response = np.expand_dims(stack_state, axis=0)
+            action = agent.policy(get_response)
             new_state, reward, done, info = env.step(action)
 
             if last_info is None:
@@ -66,10 +74,12 @@ def evaluate_performance(env: Env, agent: Agent, stack: FrameStack, episode_amou
 
     return total_reward / episode_amount
 
+
 ########################################################################################################################
 
 
-def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: FrameStack, episode: int, epsilon: float) -> None:
+def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: FrameStack, episode: int,
+                       epsilon: float) -> None:
     """
     A function to collect gameplay data
 
@@ -90,15 +100,22 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
     stack.add_frame(state)
 
     while not done:
+        # Normalize the pixels
         stack_state = stack.get_stacked_state()
+
 
         # Exploration vs Exploitation
         if random.random() > epsilon:
-            # print(len(stack_state), len(stack_state[0]), len(stack_state[0][0]), len(stack_state[0][0][0]))
-            action = agent.policy(stack_state)
+            # Add 1 dimension as the batch size is 1
+            get_response = np.expand_dims(stack_state, axis=0)
+            action = agent.policy(get_response)
         else:
             action = random.randint(0, 11)
             epsilon *= EPSILON_DECAY
+
+            ## Epsilon should never reach 0
+            if epsilon < MIN_EPSILON:
+                epsilon = MIN_EPSILON
 
         new_state, reward, done, info = env.step(action)
 
@@ -112,7 +129,6 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
         # Add the new state to memory
         stack.add_frame(new_state)
         new_stack_state = stack.get_stacked_state()
-
         buffer.store_experience(stack_state, new_stack_state, reward, action, done)
 
         # Updating info for next step
@@ -156,9 +172,10 @@ env = JoypadSpace(env, COMPLEX_MOVEMENT)
 actions = len(COMPLEX_MOVEMENT)
 shape = env.observation_space.shape
 frame_stack_size = 6
+input_shape = (frame_stack_size,) + shape
 
 # Initialize the different components
-agent = Agent(shape, frame_stack_size, BATCH_SIZE, DISCOUNT)
+agent = Agent(input_shape, actions, BATCH_SIZE, DISCOUNT)
 buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
 stack = FrameStack(frame_stack_size)
 

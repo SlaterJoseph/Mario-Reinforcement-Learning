@@ -38,7 +38,7 @@ class Agent:
         # Process the frames / frame stack
         network.add(Conv2D(32, (8, 8), strides=(4, 4)))
         network.add(Conv2D(64, (4, 4), strides=(2, 2)))
-        network.add(Conv2D(32, (2, 2), strides=(1, 1)))
+        # network.add(Conv2D(32, (2, 2), strides=(1, 1)))
 
         # Flatten for analysis
         network.add(Flatten())
@@ -82,16 +82,21 @@ class Agent:
         :param batch: a batch of gameplay experiences
         :return: training loss
         """
-        current_states = np.array([transition[0] for transition in batch])
+        current_states = np.array(batch[0])
         current_qs_list = self.q_network.predict(current_states)
 
-        new_current_states = np.array([transition[1] for transition in batch])
+        new_current_states = np.array(batch[1])
         future_qs_list = self.q_network.predict(new_current_states)
 
         X = list()
         y = list()
 
-        for i, (current_state, new_current_state, reward, action, done) in enumerate(batch):
+        for i in range(len(batch)):
+            current_state = batch[0][i]
+            new_current_state = batch[1][i]
+            reward = batch[2][i]
+            action = batch[3][i]
+            done = batch[4][i]
 
             if not done:
                 max_future_q = np.max(future_qs_list[i])
@@ -105,8 +110,8 @@ class Agent:
             X.append(current_state)
             y.append(current_qs)
 
-        history = self.q_network.fit(X=np.array(X), y=np.array(y), batch_size=len(batch))
-        loss = history.loss
+        history = self.q_network.fit(x=np.array(X), y=np.array(y), batch_size=len(batch))
+        loss = history.history['loss']
         return loss
 
     def save_weights(self, path: str) -> None:
@@ -117,4 +122,4 @@ class Agent:
         """
 
         self.q_network.save_weights(path + '-q')
-        self.q_network.save_weights(path + '-t')
+        self.target_network.save_weights(path + '-t')
