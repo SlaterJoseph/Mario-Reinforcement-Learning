@@ -1,4 +1,3 @@
-import numpy as np
 from gym import Env
 
 # Component Import
@@ -11,24 +10,66 @@ import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
 
+import random
+
 ###################################################################################################
 EPISODE_COUNT = 10000
+EXPERIENCE_STORAGE_SIZE = 10000
+BATCH_SIZE = 10
+RENDER_EVERY = 500
+UPDATE_EVERY = 50
+MONITOR_EVERY = 100
 
-###################################################################################################
+MIN_EPSILON = 0.01
+EPSILON_DECAY = 0.999999999995
+DISCOUNT = 0.95
 
-agent = Agent()
-buffer = ReplayBuffer()
-stack = FrameStack(6)
-
-env = gym_super_mario_bros.make('SuperMarioBros-v0')
-env = JoypadSpace(env, COMPLEX_MOVEMENT)
-
-for episode in range(EPISODE_COUNT):
-    experience_batch = buffer.sample_batch()
-    loss = agent.train(experience_batch)
+MODEL_PATH = 'models'
+VERSION = 'V1'
+########################################################################################################################
 
 
-def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: FrameStack):
+def evaluate_performance(env: Env, agent: Agent, stack: FrameStack, episode_amount: int) -> float:
+    """
+    Evaluate the performance of the current model
+
+    :param env: The game environment
+    :param agent: The Agent
+    :param episode_amount: The amount of episodes to test over
+    :return: Average reward across n episodes
+    """
+
+    total_reward = 0.0
+
+    for i in range(episode_amount):
+        stack.initialize(shape)
+        state = env.reset()
+        done = False
+        episode_reward = 0.0
+        last_info = None
+
+        while not done:
+            stack.add_frame(state)
+            stack_state = stack.get_stacked_state()
+            action = agent.policy(stack_state)
+            new_state, reward, done, info = env.step(action)
+
+            if last_info is None:
+                episode_reward += reward
+            else:
+                episode_reward += calculate_reward(info, last_info, reward)
+
+            state = new_state
+            last_info = info
+
+        total_reward += episode_reward
+
+    return total_reward / episode_amount
+
+########################################################################################################################
+
+
+def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: FrameStack, episode: int, epsilon: float) -> None:
     """
     A function to collect gameplay data
 
@@ -36,29 +77,56 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
     :param agent: the agent being trained
     :param buffer: the replay buffer for storing states
     :param stack: the current frame stack used in training
+    :param episode: the current episode number
     :return: None
     """
 
-    stack.initialize(env.observation_space.shape)
+    stack.initialize(shape)
     state = env.reset()
     done = False
     last_info = None
 
+    # Add the initial frame to the stack
+    stack.add_frame(state)
+
     while not done:
-        action = agent.policy(state)
+        stack_state = stack.get_stacked_state()
+
+        # Exploration vs Exploitation
+        if random.random() > epsilon:
+            # print(len(stack_state), len(stack_state[0]), len(stack_state[0][0]), len(stack_state[0][0][0]))
+            action = agent.policy(stack_state)
+        else:
+            action = random.randint(0, 11)
+            epsilon *= EPSILON_DECAY
+
         new_state, reward, done, info = env.step(action)
 
-        if last_info is not None:
+        # Render every so often to monitor progress
+        if episode % RENDER_EVERY == 0 and episode != 0:
+            env.render()
+
+        if last_info is not None:  # To ignore the 1st step of the episode
             reward = calculate_reward(info, last_info, reward)
 
-        buffer.store_experience(state, new_state, reward, action, done)
+        # Add the new state to memory
+        stack.add_frame(new_state)
+        new_stack_state = stack.get_stacked_state()
+
+        buffer.store_experience(stack_state, new_stack_state, reward, action, done)
 
         # Updating info for next step
         last_info = info
         state = new_state
 
+        # If the end of a level is reached, we clear the frame stack
+        if info['flag_get']:
+            stack.initialize(shape)
 
-def calculate_reward(info: dict, last_info: dict, reward: float):
+
+########################################################################################################################
+
+def calculate_reward(info: dict, last_info: dict, reward: float) -> float:
     """
     Calculates the reward of a given state using the given reward along
     with a few additional parameters
@@ -69,6 +137,7 @@ def calculate_reward(info: dict, last_info: dict, reward: float):
     :return: float
     """
 
+    # Adding reward based on score so agent tries killing enemies and getting power ups
     old_score, new_score = last_info['score'], info['score']
     score_delta = new_score - old_score
     score_reward = score_delta / 10000  # So a 10 score change is only worth 0.001
@@ -78,15 +147,38 @@ def calculate_reward(info: dict, last_info: dict, reward: float):
     return reward
 
 
-def frame_stack_to_state(frame_stack: FrameStack, state: np.array):
-    """
-    A function which adds the new frame and converts the frame stack into a np array
+########################################################################################################################
+# Initialize the environment
+env = gym_super_mario_bros.make('SuperMarioBros-v0')
+env = JoypadSpace(env, COMPLEX_MOVEMENT)
 
-    :param frame_stack: The current frame stack
-    :param state: The new state
-    :return: np array
-    """
+# Create some key variables
+actions = len(COMPLEX_MOVEMENT)
+shape = env.observation_space.shape
+frame_stack_size = 6
 
-    frame_stack.add_frame(state)
-    state = np.stack(frame_stack.get_stack(), axis=-1)
-    return state
+# Initialize the different components
+agent = Agent(shape, frame_stack_size, BATCH_SIZE, DISCOUNT)
+buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
+stack = FrameStack(frame_stack_size)
+
+sum_reward = 0.0
+epsilon = 0.9
+
+# Training over n episodes
+for episode in range(EPISODE_COUNT):
+    collect_experience(env, agent, buffer, stack, episode, epsilon)
+    experience_batch = buffer.sample_batch()
+    loss = agent.train(experience_batch)
+
+    if episode % MONITOR_EVERY == 0:
+        avg_reward = evaluate_performance(env, agent, stack, 10)
+        print(f'Episode {episode}/{EPISODE_COUNT} -- Avg Reward is {avg_reward}, Loss is {loss}')
+    else:
+        print(f'Episode {episode}/{EPISODE_COUNT} -- Loss is {loss}')
+
+    if episode % UPDATE_EVERY == 0:
+        agent.update_target_network()
+
+env.close()
+agent.save_weights(f'..{MODEL_PATH}/{VERSION}')
