@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 
 from keras import Sequential
-from keras.layers import Conv2D, Dense, Input, Flatten
+from keras.layers import Conv2D, Dense, Input, Flatten, Activation
 from keras.optimizers import Adam
 
 
@@ -37,15 +37,18 @@ class Agent:
 
         # Process the frames / frame stack
         network.add(Conv2D(32, (8, 8), strides=(4, 4)))
+        network.add(Activation('relu'))
         network.add(Conv2D(64, (4, 4), strides=(2, 2)))
-        # network.add(Conv2D(32, (2, 2), strides=(1, 1)))
+        network.add(Activation('relu'))
+        network.add(Conv2D(64, (2, 2), strides=(1, 1)))
+        network.add(Activation('relu'))
 
         # Flatten for analysis
         network.add(Flatten())
 
         # Analyze the frames
-        network.add(Dense(64, activation='relu', kernel_initializer='he_uniform'))
-        network.add(Dense(64, activation='relu', kernel_initializer='he_uniform'))
+        network.add(Dense(512, activation='relu', kernel_initializer='he_uniform'))
+        # network.add(Dense(64, activation='relu', kernel_initializer='he_uniform'))
 
         # Decide the probabilities of each action
         network.add(Dense(actions, activation='linear', kernel_initializer='he_uniform'))  # End Layer
@@ -114,12 +117,12 @@ class Agent:
         loss = history.history['loss']
         return loss
 
-    def save_weights(self, path: str) -> None:
+    def save_weights(self, path: str, episode: int) -> None:
         """
         Save the weights of the target and q networks
         :param path: Path to save the weights
         :return: None
         """
 
-        self.q_network.save_weights(path + '-q')
-        self.target_network.save_weights(path + '-t')
+        self.q_network.save_weights(f'{path}-q-{episode}')
+        self.target_network.save_weights(f'{path}-t-{episode}')

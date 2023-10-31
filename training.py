@@ -10,19 +10,24 @@ from Components.frame_stack import FrameStack
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
-
 import random
 
+# Data Tracking
+import matplotlib.pyplot as plt
+
 ###################################################################################################
-EPISODE_COUNT = 100
+EPISODE_COUNT = 1000
 EXPERIENCE_STORAGE_SIZE = 10000
-BATCH_SIZE = 10
-RENDER_EVERY = 25
-UPDATE_EVERY = 25
-MONITOR_EVERY = 25
+BATCH_SIZE = 1000
+
+RENDER_EVERY = 10
+UPDATE_EVERY = 50
+MONITOR_EVERY = 50
+SAVE_EVERY = 100
+TRAIN_EVERY = 100
 
 MIN_EPSILON = 0.01
-EPSILON_DECAY = 0.999999999995
+EPSILON_DECAY = 0.995
 DISCOUNT = 0.95
 
 MODEL_PATH = 'models'
@@ -30,7 +35,6 @@ VERSION = 'V1'
 
 
 ########################################################################################################################
-
 
 def evaluate_performance(env: Env, agent: Agent, stack: FrameStack, episode_amount: int) -> float:
     """
@@ -79,7 +83,7 @@ def evaluate_performance(env: Env, agent: Agent, stack: FrameStack, episode_amou
 
 
 def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: FrameStack, episode: int,
-                       epsilon: float) -> None:
+                       epsilon: float) -> float:
     """
     A function to collect gameplay data
 
@@ -95,6 +99,7 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
     state = env.reset()
     done = False
     last_info = None
+    episode_total_reward = 0
 
     # Add the initial frame to the stack
     stack.add_frame(state)
@@ -103,7 +108,6 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
         # Normalize the pixels
         stack_state = stack.get_stacked_state()
 
-
         # Exploration vs Exploitation
         if random.random() > epsilon:
             # Add 1 dimension as the batch size is 1
@@ -111,11 +115,6 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
             action = agent.policy(get_response)
         else:
             action = random.randint(0, 11)
-            epsilon *= EPSILON_DECAY
-
-            ## Epsilon should never reach 0
-            if epsilon < MIN_EPSILON:
-                epsilon = MIN_EPSILON
 
         new_state, reward, done, info = env.step(action)
 
@@ -126,6 +125,8 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
         if last_info is not None:  # To ignore the 1st step of the episode
             reward = calculate_reward(info, last_info, reward)
 
+        episode_total_reward += reward
+
         # Add the new state to memory
         stack.add_frame(new_state)
         new_stack_state = stack.get_stacked_state()
@@ -135,9 +136,11 @@ def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: Fram
         last_info = info
         state = new_state
 
-        # If the end of a level is reached, we clear the frame stack
-        if info['flag_get']:
+        # If the end of a level is reached or a life is lost, we clear the frame stack
+        if info['flag_get'] or last_info['life'] > info['life']:
             stack.initialize(shape)
+
+    return episode_total_reward
 
 
 ########################################################################################################################
@@ -165,13 +168,14 @@ def calculate_reward(info: dict, last_info: dict, reward: float) -> float:
 
 ########################################################################################################################
 # Initialize the environment
-env = gym_super_mario_bros.make('SuperMarioBros-v0')
+env = gym_super_mario_bros.make('SuperMarioBros-v0', )
+# env = AtariPreprocessing(env=env, frame_skip=4)
 env = JoypadSpace(env, COMPLEX_MOVEMENT)
 
 # Create some key variables
 actions = len(COMPLEX_MOVEMENT)
 shape = env.observation_space.shape
-frame_stack_size = 6
+frame_stack_size = 4
 input_shape = (frame_stack_size,) + shape
 
 # Initialize the different components
@@ -179,23 +183,50 @@ agent = Agent(input_shape, actions, BATCH_SIZE, DISCOUNT)
 buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
 stack = FrameStack(frame_stack_size)
 
-sum_reward = 0.0
-epsilon = 0.9
+epsilon = 1.0
+
+loss_list = list()
 
 # Training over n episodes
 for episode in range(EPISODE_COUNT):
     collect_experience(env, agent, buffer, stack, episode, epsilon)
     experience_batch = buffer.sample_batch()
-    loss = agent.train(experience_batch)
 
-    if episode % MONITOR_EVERY == 0:
-        avg_reward = evaluate_performance(env, agent, stack, 10)
-        print(f'Episode {episode}/{EPISODE_COUNT} -- Avg Reward is {avg_reward}, Loss is {loss}')
-    else:
-        print(f'Episode {episode}/{EPISODE_COUNT} -- Loss is {loss}')
+    if episode % TRAIN_EVERY == 0 and episode != 0:
+        loss = agent.train(experience_batch)
+        loss_list.append(loss)
 
-    if episode % UPDATE_EVERY == 0:
+    # if episode % MONITOR_EVERY == 0 and episode != 0:
+    #     avg_reward = evaluate_performance(env, agent, stack, 10)
+    #     print(f'Episode {episode}/{EPISODE_COUNT} -- Avg Reward is {avg_reward}, Loss is {loss}')
+    # else:
+    print(f'Episode {episode + 1}/{EPISODE_COUNT} -- Epsilon is {epsilon}')
+
+    epsilon *= EPSILON_DECAY
+
+    # Epsilon should never reach 0
+    if epsilon < MIN_EPSILON:
+        epsilon = MIN_EPSILON
+
+    if episode % UPDATE_EVERY == 0 and episode != 0:
         agent.update_target_network()
 
+    if episode % SAVE_EVERY == 0 and episode != 0:
+        agent.save_weights(f'{MODEL_PATH}/{VERSION}', episode)
+
 env.close()
-agent.save_weights(f'..{MODEL_PATH}/{VERSION}')
+
+plt.figure(figsize=(10, 6))
+plt.plot([x for x in range(1, 1000)], loss_list, color='blue')
+plt.title('Loss Over Episodes')
+plt.xlabel('Episode')
+plt.ylabel('Loss')
+plt.grid(True)
+
+plt.show()
+
+# Implement 4 frame skips -- 4 frames are 1 input,
+# so there is no need ot input 4 frames individually, input 4 frames as 1 chunk then the next 4 frames
+
+# Implement grayscale conversion (Option)
+# Change to Simple moveset (Option)
