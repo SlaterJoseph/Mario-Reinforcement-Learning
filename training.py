@@ -15,6 +15,9 @@ import random
 # Utils imports
 from utils import preprocess_states, sync_weights, train
 
+# Plotting
+import matplotlib.pyplot as plt
+
 ###################################################################################################
 EPISODE_COUNT = 10000
 EXPERIENCE_STORAGE_SIZE = 50000
@@ -48,15 +51,18 @@ buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
 epsilon = 1.00
 
 score_list = list()
-stage_list = list()
+stage_dict = dict()
 total_score = 0.0
+episode_score = 0.0
 loss = 0.0
 training_count = 0
+rendering = False
 
 for episode in range(EPISODE_COUNT):
     state = preprocess_states(env.reset())
     done = False
     level = (0, 0)
+    level_number = 0
 
     # Exploration vs Exploitation
     while not done:
@@ -69,19 +75,19 @@ for episode in range(EPISODE_COUNT):
         observation = preprocess_states(observation)
 
         total_score += reward
-        epsilon *= EPSILON_DECAY
 
         reward = np.sign(reward) * (np.sqrt(abs(reward) + 1) - 1) + 0.001 * reward
         buffer.store_experience(state, observation, float(reward), action, int(1 - done))
-
         state = observation
 
+        # Some stage tracking
         level = (info['world'], info['stage'])
-        stage_list.append((level[0] * 4) - level[1])
+        level_number = (level[0] * 4) - level[1]
 
         # Render for visual validation that the training is working
         if episode % RENDER_EVERY == 0:
             env.render()
+            rendering = True
 
         # Training
         if len(buffer) > 2000 and episode != 0:
@@ -95,12 +101,35 @@ for episode in range(EPISODE_COUNT):
             q_model.save_weights(WEIGHT_PATH + f'q_{episode}')
             target_model.save_weights(WEIGHT_PATH + f'target_{episode}')
 
-    # Print updates of training
-    if episode & PRINT_EVERY == 0:
-        print(f'Epoch: {episode} | Score : {total_score / PRINT_EVERY} |'
-              f' Loss : {loss / PRINT_EVERY} | Level : {level}')
+    epsilon *= EPSILON_DECAY
+    print(f'Epsilon : {epsilon}')
 
-        score_list.append(total_score / PRINT_EVERY)
+    if level_number not in stage_dict:
+        stage_dict[level_number] = 0
+    stage_dict[level_number] += 1
+    score_list.append(episode_score)
+
+    # Print updates of training
+    if episode % PRINT_EVERY == 0:
+        print(f'Epoch: {episode} | Score : {total_score / PRINT_EVERY} |'
+              f' Loss : {loss / PRINT_EVERY} | Level : {level} | Epsilon : {epsilon}')
+
         total_score = 0
         loss = 0.0
 
+if rendering:
+    env.close()
+    rendering = False
+
+# Show how far the bot made it and how many times
+plt.bar(list(stage_dict.keys()), list(stage_dict.values()))
+plt.xlabel('Levels')
+plt.ylabel('Times Reached')
+plt.title('Times an Episode Ended on a Level')
+
+plt.plot(EPISODE_COUNT, score_list)
+plt.xlabel('Episode Count')
+plt.ylabel('Score')
+plt.title('Score over Episodes')
+
+plt.show()
