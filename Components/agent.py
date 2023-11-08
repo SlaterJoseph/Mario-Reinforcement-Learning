@@ -1,15 +1,15 @@
 import tensorflow as tf
-import keras
 from keras.layers import Conv2D, Dense, Flatten
 from keras.initializers import glorot_uniform, Constant
-
+from keras import Sequential
 import numpy as np
 
 
-class Agent(keras.Model):
+class Agent(Sequential):
     """
     Agent which play mario and learns
     """
+
     def __init__(self, actions):
         super(Agent, self).__init__()
         self.conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')
@@ -39,7 +39,9 @@ class Agent(keras.Model):
         adv = self.q(input)
         v = self.v(input)
 
-        return tf.cast(v, dtype=tf.float32) + (tf.cast(adv, dtype=tf.float32) - 1 / tf.cast(tf.shape(adv)[-1], dtype=tf.float32) * tf.reduce_max(adv, axis=-1, keepdims=True))
+        return tf.cast(v, dtype=tf.float32) + (tf.cast(adv, dtype=tf.float32) - 1 /
+                                               tf.cast(tf.shape(adv)[-1], dtype=tf.float32)
+                                               * tf.reduce_max(adv, axis=-1, keepdims=True))
 
     def weights(self) -> None:
         """
@@ -54,3 +56,19 @@ class Agent(keras.Model):
                 layer.kernel_initializer = kernel_initializer
                 layer.bias_initializer = bias_initializer
 
+    def get_weights(self) -> list:
+        """
+        Get the weights of the current layers
+        :return: A list of layer weights
+        """
+        weights = [layer.get_weights() for layer in self.layers]
+        return weights
+
+    def set_weights(self, weights: list) -> None:
+        """
+        Update the current model using the provided weights
+        :param weights: A list of weights
+        :return: None
+        """
+        for layer, layer_weights in zip(self.layers, weights):
+            layer.set_weights(layer_weights)

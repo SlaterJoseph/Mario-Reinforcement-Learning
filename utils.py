@@ -24,51 +24,45 @@ def sync_weights(q_model: Agent, target_model: Agent) -> None:
     target_model.set_weights(weights)
 
 
-def train(q_model: Agent, target_model: Agent, batch: list[tuple], DISCOUNT: float) -> float:
-    optimizer = Adam(lr=0.0001)
+def train(q_model: Agent, target_model: Agent, batch: tuple, discount: float) -> float:
+    optimizer = Adam(learning_rate=0.0001)
 
-    states = [item[0] for item in batch]
-    observations = [item[1] for item in batch]
-    rewards = [item[2] for item in batch]
-    actions = [item[3] for item in batch]
-    done = [item[4] for item in batch]
-
-    # Convert to NumPy arrays
-    states = np.array(states)
-    observations = np.array(observations)
-    actions = np.array(actions)
-    rewards = np.array(rewards)
-    done = np.array(done)
+    # Assigns variables to each list
+    states = batch[0]
+    observations = batch[1]
+    rewards = batch[2]
+    actions = batch[3]
+    done = batch[4]
 
     # Squeeze the dimensions with size 1
-    states = np.squeeze(states, axis=1)
-    observations = np.squeeze(observations, axis=1)
-    actions = np.squeeze(actions, axis=1)
+    # states = np.squeeze(states, axis=1)
+    # observations = np.squeeze(observations, axis=1)
+    # actions = np.squeeze(actions, axis=1)
 
-    # Convert to TensorFlow tensors
+    # Convert to tensors
     states = tf.convert_to_tensor(states, dtype=tf.float32)
     observations = tf.convert_to_tensor(observations, dtype=tf.float32)
     rewards = tf.convert_to_tensor(rewards, dtype=tf.float32)
     actions = tf.convert_to_tensor(actions, dtype=tf.int32)  # Assuming 'a' represents actions
 
-    # Calculate Q-values for the current and next states
-    q_values = q_model(states)
-    q_prime_values = target_model(observations)
+    with tf.GradientTape() as tape:
+        # Calculate Q-values for the current and next states
+        q_values = q_model(states)
+        q_prime_values = target_model(observations)
 
-    # Find the action that maximizes Q-value for the next state
-    a_max = tf.argmax(q_prime_values, axis=1, output_type=tf.int32)
+        # Find the action that maximizes Q-value for the next state
+        a_max = tf.argmax(q_prime_values, axis=1, output_type=tf.int32)
 
-    # Gather Q-values for the selected actions
-    q_value = tf.gather(q_values, actions, axis=1)
+        # Gather Q-values for the selected actions
+        q_value = tf.gather(q_values, actions, axis=1)
 
-    # Calculate the target Q-value based on the Bellman equation
-    y = rewards + DISCOUNT * tf.gather(q_prime_values, a_max, axis=1) * done
+        # Calculate the target Q-value based on the Bellman equation
+        y = rewards + discount * tf.gather(q_prime_values, a_max, axis=1) * done
 
-    # Compute the loss using the Huber loss
-    loss = tf.losses.huber(y, q_value)
+        # Compute the loss using the Huber loss
+        loss = tf.reduce_mean(tf.losses.huber(y, q_value))
+        # Compute gradients and update the model
 
-    # Perform a gradient descent step
-    gradients = tf.gradients(loss, q_model.trainable_variables)
+    gradients = tape.gradient(loss, q_model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, q_model.trainable_variables))
-
     return loss
