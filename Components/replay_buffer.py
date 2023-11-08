@@ -1,6 +1,4 @@
 import numpy as np
-
-from collections import deque
 import random
 
 
@@ -12,7 +10,7 @@ class ReplayBuffer:
     """
 
     def __init__(self, experience_storage_size: int, batch_size: int):
-        self.experiences = deque(maxlen=experience_storage_size)
+        self.experiences = CustomDeque(experience_storage_size)
         self.batch_size = batch_size
 
     def store_experience(self, state: np.array, result: np.array, reward: float, action: int, done: int) -> None:
@@ -26,7 +24,7 @@ class ReplayBuffer:
         :return: None
         """
         # Store the recent state and all relevant info
-        self.experiences.append((state, result, reward, action, done))
+        self.experiences.add((state, result, reward, action, done))
 
     def sample_batch(self) -> tuple:
         """
@@ -34,8 +32,12 @@ class ReplayBuffer:
         :return: a list of experiences
         """
         # Get a random sample if we have more than the length, otherwise take all the memory
-        batch = random.sample(self.experiences, k=self.batch_size) if \
-            len(self.experiences) > self.batch_size else self.experiences
+
+        batch = list()
+        i = 0
+        while i < self.batch_size:
+            batch.append(self.experiences.collect())
+            i += 1
 
         state = list()
         new_state = list()
@@ -55,3 +57,33 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.experiences)
+
+
+class CustomDeque:
+    """
+    Custom Deque in an attempt to save time
+    """
+    def __init__(self, max_len):
+        self.deque = list()
+        self.max_len = max_len
+
+    def add(self, value) -> None:
+        """
+        Add a new element to the Deque
+        :param value: The value to be added
+        :return: None
+        """
+        if len(self.deque) == self.max_len:
+            del self.deque[0]
+        self.deque.append(value)
+
+    def collect(self) -> any:
+        """
+        Collecting a single experience from the deque
+        :return: The collected experience
+        """
+        index = int(random.randint(0, len(self.deque) - 1))
+        return self.deque.pop(index)
+
+    def __len__(self):
+        return len(self.deque)

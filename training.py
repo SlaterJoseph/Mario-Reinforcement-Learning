@@ -19,12 +19,12 @@ from utils import preprocess_states, sync_weights, train
 import matplotlib.pyplot as plt
 
 ###################################################################################################
-EPISODE_COUNT = 10000
+EPISODE_COUNT = 1000
 EXPERIENCE_STORAGE_SIZE = 50000
-BATCH_SIZE = 256
+BATCH_SIZE = 512
 
-RENDER_EVERY = 50
-UPDATE_EVERY = 50
+RENDER_EVERY = 25
+UPDATE_EVERY = 100
 PRINT_EVERY = 10
 MONITOR_EVERY = 50
 SAVE_EVERY = 100
@@ -66,6 +66,7 @@ for episode in range(EPISODE_COUNT):
 
     # Exploration vs Exploitation
     while not done:
+        # print(len(buffer))
         if random.random() > epsilon:
             action = np.argmax(q_model(tf.convert_to_tensor(state, dtype=tf.float32)).numpy())
         else:
@@ -84,19 +85,19 @@ for episode in range(EPISODE_COUNT):
         level = (info['world'], info['stage'])
         level_number = (level[0] * 4) - level[1]
 
-        # Render for visual validation that the training is working
+        # # Render for visual validation that the training is working
         if episode % RENDER_EVERY == 0:
             env.render()
             rendering = True
 
         # Training
-        if len(buffer) > 2000 and episode != 0:
+        if len(buffer) > 2000 and episode % UPDATE_EVERY != 0:
             batch = buffer.sample_batch()
             loss += train(q_model, target_model, batch, DISCOUNT)
             training_count += 1
 
         # Update after every UPDATE_EVERY training and save the weights
-        if training_count % UPDATE_EVERY == 0 and training_count != 0:
+        if episode % UPDATE_EVERY == 0 and episode != 0:
             sync_weights(q_model, target_model)
             q_model.save_weights(WEIGHT_PATH + f'q_{episode}')
             target_model.save_weights(WEIGHT_PATH + f'target_{episode}')
@@ -104,6 +105,7 @@ for episode in range(EPISODE_COUNT):
     epsilon *= EPSILON_DECAY
     print(f'Epsilon : {epsilon}')
 
+    # More level tracking
     if level_number not in stage_dict:
         stage_dict[level_number] = 0
     stage_dict[level_number] += 1
