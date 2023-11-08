@@ -15,7 +15,7 @@ class ReplayBuffer:
         self.experiences = deque(maxlen=experience_storage_size)
         self.batch_size = batch_size
 
-    def store_experience(self, state, result, reward, action, done) -> None:
+    def store_experience(self, state: np.array, result: np.array, reward: float, action: int, done: int) -> None:
         """
         Stores a single transaction of gameplay
         :param state: current game state
@@ -28,7 +28,7 @@ class ReplayBuffer:
         # Store the recent state and all relevant info
         self.experiences.append((state, result, reward, action, done))
 
-    def sample_batch(self) -> tuple:
+    def sample_batch(self) -> list[tuple]:
         """
         Samples a batch of experiences for training
         :return: a list of experiences
@@ -51,4 +51,11 @@ class ReplayBuffer:
             action.append(sample[3])
             done.append(sample[4])
 
+        print(np.array(state).shape, np.array(new_state).shape, np.array(reward).shape, np.array(action).shape,
+              np.array(done).shape)
+        print(len(state), len(new_state), len(reward), len(action), len(done))
+
         return np.array(state), np.array(new_state), np.array(reward), np.array(action), np.array(done)
+
+    def __len__(self):
+        return len(self.experiences)

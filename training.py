@@ -1,232 +1,106 @@
 import numpy as np
-from gym import Env
+import tensorflow as tf
 
 # Component Import
 from Components.agent import Agent
 from Components.replay_buffer import ReplayBuffer
-from Components.frame_stack import FrameStack
 
 # Environment Import
 import gym_super_mario_bros
 from nes_py.wrappers import JoypadSpace
 from gym_super_mario_bros.actions import COMPLEX_MOVEMENT
+from wrappers import wrap_mario
 import random
 
-# Data Tracking
-import matplotlib.pyplot as plt
+# Utils imports
+from utils import preprocess_states, sync_weights, train
 
 ###################################################################################################
-EPISODE_COUNT = 1000
-EXPERIENCE_STORAGE_SIZE = 10000
-BATCH_SIZE = 1000
+EPISODE_COUNT = 10000
+EXPERIENCE_STORAGE_SIZE = 50000
+BATCH_SIZE = 256
 
-RENDER_EVERY = 10
+RENDER_EVERY = 50
 UPDATE_EVERY = 50
+PRINT_EVERY = 10
 MONITOR_EVERY = 50
 SAVE_EVERY = 100
-TRAIN_EVERY = 100
+TRAIN_EVERY = 25
+ACTION_EVERY = 4
 
 MIN_EPSILON = 0.01
-EPSILON_DECAY = 0.995
-DISCOUNT = 0.95
+EPSILON_DECAY = 0.9975
+DISCOUNT = 0.99
 
-MODEL_PATH = 'models'
-VERSION = 'V1'
+VERSION = 'V4'
+WEIGHT_PATH = f'/Models/{VERSION}/'
+###################################################################################################
 
+env = gym_super_mario_bros.make('SuperMarioBros-v0')
+env = JoypadSpace(env, COMPLEX_MOVEMENT)
+env = wrap_mario(env)
 
-########################################################################################################################
+actions = len(COMPLEX_MOVEMENT)
 
-def evaluate_performance(env: Env, agent: Agent, stack: FrameStack, episode_amount: int) -> float:
-    """
-    Evaluate the performance of the current model
+q_model = Agent(actions)
+target_model = Agent(actions)
+buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
+epsilon = 1.00
 
-    :param env: The game environment
-    :param agent: The Agent
-    :param episode_amount: The amount of episodes to test over
-    :return: Average reward across n episodes
-    """
+score_list = list()
+stage_list = list()
+total_score = 0.0
+loss = 0.0
+training_count = 0
 
-    total_reward = 0.0
-
-    for i in range(episode_amount):
-        stack.initialize(shape)
-        state = env.reset()
-        done = False
-        episode_reward = 0.0
-        last_info = None
-
-        while not done:
-            stack.add_frame(state)
-
-            # Normalize the pixels
-            stack_state = stack.get_stacked_state()
-
-            # Add 1 dimension as the batch size is 1
-            get_response = np.expand_dims(stack_state, axis=0)
-            action = agent.policy(get_response)
-            new_state, reward, done, info = env.step(action)
-
-            if last_info is None:
-                episode_reward += reward
-            else:
-                episode_reward += calculate_reward(info, last_info, reward)
-
-            state = new_state
-            last_info = info
-
-        total_reward += episode_reward
-
-    return total_reward / episode_amount
-
-
-########################################################################################################################
-
-
-def collect_experience(env: Env, agent: Agent, buffer: ReplayBuffer, stack: FrameStack, episode: int,
-                       epsilon: float) -> float:
-    """
-    A function to collect gameplay data
-
-    :param env: the environment we are using to simulate the game
-    :param agent: the agent being trained
-    :param buffer: the replay buffer for storing states
-    :param stack: the current frame stack used in training
-    :param episode: the current episode number
-    :return: None
-    """
-
-    stack.initialize(shape)
-    state = env.reset()
+for episode in range(EPISODE_COUNT):
+    state = preprocess_states(env.reset())
     done = False
-    last_info = None
-    episode_total_reward = 0
+    level = (0, 0)
 
-    # Add the initial frame to the stack
-    stack.add_frame(state)
-
+    # Exploration vs Exploitation
     while not done:
-        # Normalize the pixels
-        stack_state = stack.get_stacked_state()
-
-        # Exploration vs Exploitation
         if random.random() > epsilon:
-            # Add 1 dimension as the batch size is 1
-            get_response = np.expand_dims(stack_state, axis=0)
-            action = agent.policy(get_response)
+            action = np.argmax(q_model(tf.convert_to_tensor(state, dtype=tf.float32)).numpy())
         else:
-            action = random.randint(0, 11)
+            action = env.action_space.sample()
 
-        new_state, reward, done, info = env.step(action)
+        observation, reward, done, info = env.step(action)
+        observation = preprocess_states(observation)
 
-        # Render every so often to monitor progress
-        if episode % RENDER_EVERY == 0 and episode != 0:
+        total_score += reward
+        epsilon *= EPSILON_DECAY
+
+        reward = np.sign(reward) * (np.sqrt(abs(reward) + 1) - 1) + 0.001 * reward
+        buffer.store_experience(state, observation, float(reward), action, int(1 - done))
+
+        state = observation
+
+        level = (info['world'], info['stage'])
+        stage_list.append((level[0] * 4) - level[1])
+
+        # Render for visual validation that the training is working
+        if episode % RENDER_EVERY == 0:
             env.render()
 
-        if last_info is not None:  # To ignore the 1st step of the episode
-            reward = calculate_reward(info, last_info, reward)
+        # Training
+        if len(buffer) > 2000 and episode != 0:
+            batch = buffer.sample_batch()
+            loss += train(q_model, target_model, batch, DISCOUNT)
+            training_count += 1
 
-        episode_total_reward += reward
+        # Update after every UPDATE_EVERY training and save the weights
+        if training_count % UPDATE_EVERY == 0 and training_count != 0:
+            sync_weights(q_model, target_model)
+            q_model.save_weights(WEIGHT_PATH + f'q_{episode}')
+            target_model.save_weights(WEIGHT_PATH + f'target_{episode}')
 
-        # Add the new state to memory
-        stack.add_frame(new_state)
-        new_stack_state = stack.get_stacked_state()
-        buffer.store_experience(stack_state, new_stack_state, reward, action, done)
+    # Print updates of training
+    if episode & PRINT_EVERY == 0:
+        print(f'Epoch: {episode} | Score : {total_score / PRINT_EVERY} |'
+              f' Loss : {loss / PRINT_EVERY} | Level : {level}')
 
-        # Updating info for next step
-        last_info = info
-        state = new_state
+        score_list.append(total_score / PRINT_EVERY)
+        total_score = 0
+        loss = 0.0
 
-        # If the end of a level is reached or a life is lost, we clear the frame stack
-        if info['flag_get'] or last_info['life'] > info['life']:
-            stack.initialize(shape)
-
-    return episode_total_reward
-
-
-########################################################################################################################
-
-def calculate_reward(info: dict, last_info: dict, reward: float) -> float:
-    """
-    Calculates the reward of a given state using the given reward along
-    with a few additional parameters
-
-    :param info: The information from this current state
-    :param last_info: The information from the previous state
-    :param reward: The reward from the gym's reward function -- Check notes
-    :return: float
-    """
-
-    # Adding reward based on score so agent tries killing enemies and getting power ups
-    old_score, new_score = last_info['score'], info['score']
-    score_delta = new_score - old_score
-    score_reward = score_delta / 10000  # So a 10 score change is only worth 0.001
-
-    reward += score_reward
-
-    return reward
-
-
-########################################################################################################################
-# Initialize the environment
-env = gym_super_mario_bros.make('SuperMarioBros-v0', )
-# env = AtariPreprocessing(env=env, frame_skip=4)
-env = JoypadSpace(env, COMPLEX_MOVEMENT)
-
-# Create some key variables
-actions = len(COMPLEX_MOVEMENT)
-shape = env.observation_space.shape
-frame_stack_size = 4
-input_shape = (frame_stack_size,) + shape
-
-# Initialize the different components
-agent = Agent(input_shape, actions, BATCH_SIZE, DISCOUNT)
-buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
-stack = FrameStack(frame_stack_size)
-
-epsilon = 1.0
-
-loss_list = list()
-
-# Training over n episodes
-for episode in range(EPISODE_COUNT):
-    collect_experience(env, agent, buffer, stack, episode, epsilon)
-    experience_batch = buffer.sample_batch()
-
-    if episode % TRAIN_EVERY == 0 and episode != 0:
-        loss = agent.train(experience_batch)
-        loss_list.append(loss)
-
-    # if episode % MONITOR_EVERY == 0 and episode != 0:
-    #     avg_reward = evaluate_performance(env, agent, stack, 10)
-    #     print(f'Episode {episode}/{EPISODE_COUNT} -- Avg Reward is {avg_reward}, Loss is {loss}')
-    # else:
-    print(f'Episode {episode + 1}/{EPISODE_COUNT} -- Epsilon is {epsilon}')
-
-    epsilon *= EPSILON_DECAY
-
-    # Epsilon should never reach 0
-    if epsilon < MIN_EPSILON:
-        epsilon = MIN_EPSILON
-
-    if episode % UPDATE_EVERY == 0 and episode != 0:
-        agent.update_target_network()
-
-    if episode % SAVE_EVERY == 0 and episode != 0:
-        agent.save_weights(f'{MODEL_PATH}/{VERSION}', episode)
-
-env.close()
-
-plt.figure(figsize=(10, 6))
-plt.plot([x for x in range(1, 1000)], loss_list, color='blue')
-plt.title('Loss Over Episodes')
-plt.xlabel('Episode')
-plt.ylabel('Loss')
-plt.grid(True)
-
-plt.show()
-
-# Implement 4 frame skips -- 4 frames are 1 input,
-# so there is no need ot input 4 frames individually, input 4 frames as 1 chunk then the next 4 frames
-
-# Implement grayscale conversion (Option)
-# Change to Simple moveset (Option)
