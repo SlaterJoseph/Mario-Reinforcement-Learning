@@ -13,8 +13,9 @@ class Agent(Sequential):
     def __init__(self, actions):
         super(Agent, self).__init__()
         self.conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')
-        self.conv2 = Conv2D(64, (4, 4), strides=(2, 2), activation='relu')
-        self.conv3 = Conv2D(64, (2, 2), strides=(1, 1), activation='relu')
+        self.conv2 = Conv2D(64, (3, 3), strides=(1, 1))
+        # self.conv2 = Conv2D(64, (4, 4), strides=(2, 2), activation='relu')
+        # self.conv3 = Conv2D(64, (2, 2), strides=(1, 1), activation='relu')
 
         self.flatten = Flatten()
 
@@ -24,7 +25,7 @@ class Agent(Sequential):
 
         self.weights()
 
-    def call(self, input: np.array) -> float:
+    def call(self, input: np.array) -> np.array:
         """
         The process of taking the input data and deciding on a Q value for the appropriate action
         :param input: The current observation
@@ -32,16 +33,14 @@ class Agent(Sequential):
         """
         input = self.conv1(input)
         input = self.conv2(input)
-        input = self.conv3(input)
+        # input = self.conv3(input)
         input = self.flatten(input)
         input = self.process(input)
 
         adv = self.q(input)
         v = self.v(input)
 
-        return tf.cast(v, dtype=tf.float32) + (tf.cast(adv, dtype=tf.float32) - 1 /
-                                               tf.cast(tf.shape(adv)[-1], dtype=tf.float32)
-                                               * tf.reduce_max(adv, axis=-1, keepdims=True))
+        return v + (adv - 1 / (adv.shape[-1] * tf.reduce_max(adv, axis=-1, keepdims=True)))
 
     def weights(self) -> None:
         """

@@ -19,11 +19,11 @@ from utils import preprocess_states, sync_weights, train
 import matplotlib.pyplot as plt
 
 ###################################################################################################
-EPISODE_COUNT = 1000
+EPISODE_COUNT = 10000
 EXPERIENCE_STORAGE_SIZE = 50000
 BATCH_SIZE = 512
 
-RENDER_EVERY = 25
+RENDER_EVERY = 100
 UPDATE_EVERY = 100
 PRINT_EVERY = 10
 MONITOR_EVERY = 50
@@ -31,8 +31,8 @@ SAVE_EVERY = 100
 TRAIN_EVERY = 25
 ACTION_EVERY = 4
 
-MIN_EPSILON = 0.01
-EPSILON_DECAY = 0.9975
+MIN_EPSILON = 0.001
+EPSILON_DECAY = 0.9995
 DISCOUNT = 0.99
 
 VERSION = 'V4'
@@ -48,7 +48,7 @@ actions = len(COMPLEX_MOVEMENT)
 q_model = Agent(actions)
 target_model = Agent(actions)
 buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
-epsilon = 1.00
+epsilon = 1
 
 score_list = list()
 stage_dict = dict()
@@ -66,7 +66,6 @@ for episode in range(EPISODE_COUNT):
 
     # Exploration vs Exploitation
     while not done:
-        # print(len(buffer))
         if random.random() > epsilon:
             action = np.argmax(q_model(tf.convert_to_tensor(state, dtype=tf.float32)).numpy())
         else:
@@ -97,13 +96,14 @@ for episode in range(EPISODE_COUNT):
             training_count += 1
 
         # Update after every UPDATE_EVERY training and save the weights
-        if episode % UPDATE_EVERY == 0 and episode != 0:
+        if training_count % UPDATE_EVERY == 0:
             sync_weights(q_model, target_model)
             q_model.save_weights(WEIGHT_PATH + f'q_{episode}')
             target_model.save_weights(WEIGHT_PATH + f'target_{episode}')
 
     epsilon *= EPSILON_DECAY
-    print(f'Epsilon : {epsilon}')
+    if epsilon < MIN_EPSILON:
+        epsilon = MIN_EPSILON
 
     # More level tracking
     if level_number not in stage_dict:
