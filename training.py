@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import tensorflow as tf
 
@@ -19,8 +21,8 @@ from utils import preprocess_states, sync_weights, train
 import matplotlib.pyplot as plt
 
 ###################################################################################################
-EPISODE_COUNT = 10000
-EXPERIENCE_STORAGE_SIZE = 50000
+EPISODE_COUNT = 10_000
+EXPERIENCE_STORAGE_SIZE = 50_000
 BATCH_SIZE = 512
 
 RENDER_EVERY = 100
@@ -31,12 +33,13 @@ SAVE_EVERY = 100
 TRAIN_EVERY = 25
 ACTION_EVERY = 4
 
+TEMPERATURE = 0.8
 MIN_EPSILON = 0.001
 EPSILON_DECAY = 0.9995
 DISCOUNT = 0.99
 
 VERSION = 'V4'
-WEIGHT_PATH = f'/Models/{VERSION}/'
+WEIGHT_PATH = f'./Models/{VERSION}'
 ###################################################################################################
 
 env = gym_super_mario_bros.make('SuperMarioBros-v0')
@@ -45,8 +48,8 @@ env = wrap_mario(env)
 
 actions = len(COMPLEX_MOVEMENT)
 
-q_model = Agent(actions)
-target_model = Agent(actions)
+q_model = Agent(actions, TEMPERATURE)
+target_model = Agent(actions, TEMPERATURE)
 buffer = ReplayBuffer(EXPERIENCE_STORAGE_SIZE, BATCH_SIZE)
 epsilon = 1
 
@@ -66,9 +69,9 @@ for episode in range(EPISODE_COUNT):
 
     # Exploration vs Exploitation
     while not done:
-        if random.random() > epsilon:
-            action = np.argmax(q_model(tf.convert_to_tensor(state, dtype=tf.float32)).numpy())
-        else:
+        if random.random() > epsilon:  # Use Boltzmann Exploration
+            action = q_model(tf.convert_to_tensor(state, dtype=tf.float32))[0]
+        else:  # Use Epsilon-Greedy Exploration
             action = env.action_space.sample()
 
         observation, reward, done, info = env.step(action)
@@ -98,8 +101,6 @@ for episode in range(EPISODE_COUNT):
         # Update after every UPDATE_EVERY training and save the weights
         if training_count % UPDATE_EVERY == 0:
             sync_weights(q_model, target_model)
-            q_model.save_weights(WEIGHT_PATH + f'q_{episode}')
-            target_model.save_weights(WEIGHT_PATH + f'target_{episode}')
 
     epsilon *= EPSILON_DECAY
     if epsilon < MIN_EPSILON:
@@ -122,6 +123,12 @@ for episode in range(EPISODE_COUNT):
 if rendering:
     env.close()
     rendering = False
+
+os.makedirs(WEIGHT_PATH + '/Q')
+q_model.save_weights(WEIGHT_PATH + '/Q')
+
+os.makedirs(WEIGHT_PATH + '/T')
+target_model.save_weights(WEIGHT_PATH + '/T')
 
 # Show how far the bot made it and how many times
 plt.bar(list(stage_dict.keys()), list(stage_dict.values()))

@@ -49,17 +49,18 @@ def train(q_model: Agent, target_model: Agent, batch: tuple, discount: float) ->
         # Calculate Q-values for the current and next states
         q_values = q_model(states)
         q_prime_values = target_model(observations)
+        q_prime_values = tf.cast(q_prime_values, dtype=tf.float32)
 
         # Find the action that maximizes Q-value for the next state
-        a_max = tf.argmax(q_prime_values, axis=1, output_type=tf.int32)
+        a_max = tf.argmax(q_prime_values, output_type=tf.int32)
 
         # Gather Q-values for the selected actions
-        q_value = tf.gather(q_values, actions, axis=1)
+        q_value = tf.gather(q_values, actions)
 
         # Calculate the target Q-value based on the Bellman equation
-        y = rewards + discount * tf.gather(q_prime_values, a_max, axis=1) * done
+        y = rewards + discount * tf.gather(q_prime_values, a_max) * done
 
-        # Compute the loss using the Huber loss
+        # Compute the loss using the HuberBut wh loss
         loss = tf.reduce_mean(tf.losses.huber(y, q_value))
         # Compute gradients and update the model
 

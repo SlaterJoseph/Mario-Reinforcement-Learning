@@ -10,7 +10,7 @@ class Agent(Sequential):
     Agent which play mario and learns
     """
 
-    def __init__(self, actions):
+    def __init__(self, actions: int, temperature: float):
         super(Agent, self).__init__()
         self.conv1 = Conv2D(32, (8, 8), strides=(4, 4), activation='relu')
         self.conv2 = Conv2D(64, (3, 3), strides=(1, 1))
@@ -25,11 +25,13 @@ class Agent(Sequential):
 
         self.weights()
 
+        self.temperature = temperature
+
     def call(self, input: np.array) -> np.array:
         """
         The process of taking the input data and deciding on a Q value for the appropriate action
         :param input: The current observation
-        :return:
+        :return: A np.array of the values of each action
         """
         input = self.conv1(input)
         input = self.conv2(input)
@@ -40,7 +42,10 @@ class Agent(Sequential):
         adv = self.q(input)
         v = self.v(input)
 
-        return v + (adv - 1 / (adv.shape[-1] * tf.reduce_max(adv, axis=-1, keepdims=True)))
+        prob = v + (adv - 1 / (adv.shape[-1] * tf.reduce_max(adv, axis=-1, keepdims=True)))
+        softmax_probs = tf.nn.softmax(prob / self.temperature)
+        action = tf.squeeze(tf.random.categorical(softmax_probs, 1), axis=-1)
+        return action.numpy()
 
     def weights(self) -> None:
         """
